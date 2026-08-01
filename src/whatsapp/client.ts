@@ -112,7 +112,15 @@ async function handleIncoming(
 ): Promise<void> {
   const jid = msg.key.remoteJid;
   if (!jid) return;
-  const reply = (text: string) => sock.sendMessage(jid, { text });
+  const currentSock = () => appState.socket ?? sock;
+  const reply = async (text: string) => {
+    const s = currentSock();
+    try {
+      await s.sendMessage(jid, { text });
+    } catch (err) {
+      log(`⚠️ فشل إرسال الرد: ${(err as Error).message}`);
+    }
+  };
 
   const imageMsg = msg.message?.imageMessage;
   const viewOnce = msg.message?.viewOnceMessage?.message?.imageMessage;
@@ -190,7 +198,7 @@ async function handleImage(
     let buffer: Buffer;
     try {
       buffer = (await downloadMediaMessage(msg, "buffer", {}, {
-        reuploadRequest: sock.updateMediaMessage as any,
+        reuploadRequest: (appState.socket ?? sock).updateMediaMessage as any,
         logger: pino({ level: "silent" }) as any,
       })) as Buffer;
     } catch (err) {
@@ -220,7 +228,7 @@ async function handleImage(
     if (result.type === "operation_completed" && result.operation) {
       const images = getOperationImages(store, result.operation.id);
       for (const img of images) {
-        await sock.sendMessage(jid, {
+        await (appState.socket ?? sock).sendMessage(jid, {
           image: fs.readFileSync(img),
           caption: `إشعارات العملية ${result.operation.name}`,
         });

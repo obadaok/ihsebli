@@ -100,12 +100,18 @@ export async function preprocessImage(inputPath: string, outputPath: string): Pr
   return outputPath;
 }
 
-export async function runOcr(imagePath: string, opts: { lang?: string; psm?: number } = {}): Promise<string> {
-  return tesseract.recognize(imagePath, {
-    lang: opts.lang ?? "ara+eng",
-    oem: 1,
-    psm: opts.psm ?? 6,
-  });
+export async function runOcr(imagePath: string, opts: { lang?: string; psm?: number; timeoutMs?: number } = {}): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? 60000;
+  return Promise.race([
+    tesseract.recognize(imagePath, {
+      lang: opts.lang ?? "ara+eng",
+      oem: 1,
+      psm: opts.psm ?? 6,
+    }),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`تجاوز زمن OCR (${timeoutMs}ms)`)), timeoutMs);
+    }),
+  ]);
 }
 
 export function looksLikeBankNotification(text: string): boolean {
@@ -270,12 +276,15 @@ export async function ocrImage(imagePath: string): Promise<ExtractedFields> {
   const passes: OcrPass[] = [
     { lang: "ara+eng", psm: 6, image: upscaled, weight: 3 },
     { lang: "ara", psm: 11, image: imagePath, weight: 2 },
-    { lang: "ara+eng", psm: 12, image: imagePath, weight: 1 },
   ];
 
   const results: Array<{ pass: OcrPass; text: string }> = [];
   for (const pass of passes) {
-    results.push({ pass, text: await runOcr(pass.image, { lang: pass.lang, psm: pass.psm }) });
+    try {
+      results.push({ pass, text: await runOcr(pass.image, { lang: pass.lang, psm: pass.psm, timeoutMs: 45000 }) });
+    } catch (err) {
+      console.error(`فشل ممر OCR (${pass.lang} psm${pass.psm}):`, (err as Error).message);
+    }
   }
 
   const texts = results.map((r) => r.text);
