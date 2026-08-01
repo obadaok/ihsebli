@@ -1,7 +1,4 @@
 import tesseract from "node-tesseract-ocr";
-import fs from "node:fs";
-import path from "node:path";
-import sharp from "sharp";
 import { normalizeAccountNumber, normalizeAmount } from "../utils/format.js";
 
 export interface ExtractedFields {
@@ -88,17 +85,6 @@ const BANK_NOTIFICATION_HINTS = [
   "الرصيد",
   "رصيد",
 ];
-
-export async function preprocessImage(inputPath: string, outputPath: string): Promise<string> {
-  let image = sharp(inputPath);
-  const meta = await image.metadata();
-  const width = meta.width ?? 0;
-  if (width < 900) {
-    image = image.resize({ width: Math.round(width * 2), withoutEnlargement: false });
-  }
-  await image.toFile(outputPath);
-  return outputPath;
-}
 
 export async function runOcr(imagePath: string, opts: { lang?: string; psm?: number; timeoutMs?: number } = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 60000;
@@ -269,19 +255,15 @@ function pickBest<T>(values: Array<{ v: T | null; w: number }>): T | null {
 }
 
 export async function ocrImage(imagePath: string): Promise<ExtractedFields> {
-  const dir = path.dirname(imagePath);
-  const upscaled = path.join(dir, `up_${path.basename(imagePath)}.png`);
-  await preprocessImage(imagePath, upscaled);
-
   const passes: OcrPass[] = [
-    { lang: "ara+eng", psm: 6, image: upscaled, weight: 3 },
+    { lang: "ara+eng", psm: 6, image: imagePath, weight: 3 },
     { lang: "ara", psm: 11, image: imagePath, weight: 2 },
   ];
 
   const results: Array<{ pass: OcrPass; text: string }> = [];
   for (const pass of passes) {
     try {
-      results.push({ pass, text: await runOcr(pass.image, { lang: pass.lang, psm: pass.psm, timeoutMs: 45000 }) });
+      results.push({ pass, text: await runOcr(pass.image, { lang: pass.lang, psm: pass.psm, timeoutMs: 30000 }) });
     } catch (err) {
       console.error(`فشل ممر OCR (${pass.lang} psm${pass.psm}):`, (err as Error).message);
     }
@@ -304,8 +286,6 @@ export async function ocrImage(imagePath: string): Promise<ExtractedFields> {
     const { account } = extractAccountFromText(r.text);
     if (account) candidateSet.add(account);
   }
-
-  fs.rmSync(upscaled, { force: true });
 
   return {
     text: mergedText,
