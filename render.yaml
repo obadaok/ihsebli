@@ -9,7 +9,3 @@ services:
         value: 3000
       - key: IHSEBLI_DATA
         value: /data
-    disk:
-      name: ihsebli-data
-      mountPath: /data
-      sizeGB: 1
