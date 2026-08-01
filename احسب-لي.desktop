@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=احسب لي
+Name[en]=Ihsebli Server
+Comment=تشغيل سيرفر احسب لي
+Exec=/home/obada/Documents/ihsebli/تشغيل-احسب-لي.sh
+Terminal=true
+Icon=utilities-terminal
+Categories=Utility;

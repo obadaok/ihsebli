@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ihsebli
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: IHSEBLI_DATA
+        value: /data
+    disk:
+      name: ihsebli-data
+      mountPath: /data
+      sizeGB: 1
