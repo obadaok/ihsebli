@@ -17,8 +17,7 @@ import path from "node:path";
 import qrcode from "qrcode-terminal";
 import type { Store } from "../db/database.js";
 import { appState } from "../http/state.js";
-import { parseMessage } from "../utils/parsing.js";
-import { formatOperation, formatAmount } from "../utils/format.js";
+import { parseMessage } from "../utils/parsing.js";import { formatOperation, formatAmount } from "../utils/format.js";
 import { parseAdminCommand, handleAdminCommand } from "../admin/commands.js";
 import { processNotification, getOperationImages } from "../domain/processor.js";
 import { ocrImage, isBankNotification } from "../ocr/ocr.js";
@@ -54,6 +53,7 @@ export async function startWhatsApp(config: WhatsAppConfig): Promise<WASocket> {
   });
 
   sock.ev.on("creds.update", saveCreds);
+  appState.socket = sock;
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
@@ -68,6 +68,8 @@ export async function startWhatsApp(config: WhatsAppConfig): Promise<WASocket> {
     }
     if (connection === "open") {
       appState.qr = "";
+      appState.pairingCode = "";
+      appState.pairingPhone = "";
       appState.statusMessage = "متصل";
       log("✅ متصل بواتساب بنجاح.");
     }
