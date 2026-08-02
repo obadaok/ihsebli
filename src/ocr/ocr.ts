@@ -1,4 +1,6 @@
-import tesseract from "node-tesseract-ocr";
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { normalizeAccountNumber, normalizeAmount } from "../utils/format.js";
 
 export interface ExtractedFields {
@@ -39,16 +41,24 @@ const NOISE_WORDS = new Set([
   "التعليق",
   "رقم الموبايل",
   "من حساب",
+  "من",
   "الى حساب",
   "إلى حساب",
+  "الى",
+  "إلى",
+  "حساب",
+  "الحساب",
+  "رقم",
+  "رقم العملية",
+  "العملية",
   "طباعة",
   "تحميل",
   "بنك الخرطوم",
   "بنكك",
-  "حساب",
   "موافق",
   "إضافة",
   "مشاركة",
+  "المستفيد",
   "بلال",
   "و",
   "ما",
@@ -86,18 +96,39 @@ const BANK_NOTIFICATION_HINTS = [
   "رصيد",
 ];
 
-export async function runOcr(imagePath: string, opts: { lang?: string; psm?: number; timeoutMs?: number } = {}): Promise<string> {
+function convertImage(inputPath: string, outputPath: string, negate: boolean): Promise<void> {
+  const args = [inputPath, "-colorspace", "Gray", "-normalize"];
+  if (negate) args.push("-negate");
+  args.push(outputPath);
+  return new Promise((resolve, reject) => {
+    execFile("convert", args, { timeout: 15000 }, (err) => {
+      if (err) reject(err instanceof Error ? err : new Error(String(err)));
+      else resolve();
+    });
+  });
+}
+
+export function runOcr(imagePath: string, opts: { lang?: string; psm?: number; timeoutMs?: number } = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 60000;
-  return Promise.race([
-    tesseract.recognize(imagePath, {
-      lang: opts.lang ?? "ara+eng",
-      oem: 1,
-      psm: opts.psm ?? 6,
-    }),
-    new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`تجاوز زمن OCR (${timeoutMs}ms)`)), timeoutMs);
-    }),
-  ]);
+  const args = [
+    imagePath,
+    "stdout",
+    "-l",
+    opts.lang ?? "ara+eng",
+    "--oem",
+    "1",
+    "--psm",
+    String(opts.psm ?? 6),
+  ];
+  return new Promise((resolve, reject) => {
+    execFile("tesseract", args, { timeout: timeoutMs }, (err, stdout) => {
+      if (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
 }
 
 export function looksLikeBankNotification(text: string): boolean {
@@ -196,24 +227,31 @@ function extractTime(text: string): string | null {
 
 function isNoise(name: string): boolean {
   const words = name.split(" ");
-  return words.length === 1 && NOISE_WORDS.has(words[0]);
+  return words.every((w) => NOISE_WORDS.has(w));
 }
 
 function extractNameFromText(text: string): string | null {
   const lines = text.split(/\n/).map((l) => l.trim());
   const labelRe = /(?:اسم المستفيد|اسم المستلم|اسم المحول اليه|إسم المرسل اليه|اسم المرسل اليه|المستفيد)\s*[:：]?\s*(.+)/i;
-  const candidates: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(labelRe);
+
+  const labelMatches: string[] = [];
+  for (const line of lines) {
+    const m = line.match(labelRe);
     if (m) {
       const rest = m[1].replace(/[^\u0621-\u064A\s]/g, " ").replace(/\s+/g, " ").trim();
-      if (rest.length >= 3 && !isNoise(rest)) candidates.push(rest);
+      if (rest.length >= 3 && !isNoise(rest)) labelMatches.push(rest);
     }
   }
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].replace(/[^\u0621-\u064A\s]/g, " ").replace(/\s+/g, " ").trim();
-    if (line.split(" ").filter((w) => w.length > 1).length >= 2 && !isNoise(line)) {
-      candidates.push(line);
+  if (labelMatches.length > 0) {
+    labelMatches.sort((a, b) => b.split(" ").length - a.split(" ").length);
+    return labelMatches[0];
+  }
+
+  const candidates: string[] = [];
+  for (const line of lines) {
+    const clean = line.replace(/[^\u0621-\u064A\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (clean.split(" ").filter((w) => w.length > 1).length >= 2 && !isNoise(clean)) {
+      candidates.push(clean);
     }
   }
   if (candidates.length === 0) return null;
@@ -255,19 +293,40 @@ function pickBest<T>(values: Array<{ v: T | null; w: number }>): T | null {
 }
 
 export async function ocrImage(imagePath: string): Promise<ExtractedFields> {
-  const passes: OcrPass[] = [
-    { lang: "ara+eng", psm: 6, image: imagePath, weight: 3 },
-    { lang: "ara", psm: 11, image: imagePath, weight: 2 },
-  ];
+  const dir = path.dirname(imagePath);
+  const base = path.join(dir, `pre_${path.basename(imagePath, path.extname(imagePath))}`);
+  const prepped: string[] = [];
+  for (const [suffix, negate] of [
+    ["_n", false],
+    ["_neg", true],
+  ] as const) {
+    const out = `${base}${suffix}.png`;
+    try {
+      await convertImage(imagePath, out, negate);
+      prepped.push(out);
+    } catch (err) {
+      console.error(`فشل المعالجة المسبقة (${suffix}):`, (err as Error).message);
+    }
+  }
+  if (prepped.length === 0) prepped.push(imagePath);
+
+  const passes: OcrPass[] = prepped.map((img, i) => ({
+    lang: "ara+eng",
+    psm: 4,
+    image: img,
+    weight: i === 0 ? 3 : 2,
+  }));
 
   const results: Array<{ pass: OcrPass; text: string }> = [];
   for (const pass of passes) {
     try {
-      results.push({ pass, text: await runOcr(pass.image, { lang: pass.lang, psm: pass.psm, timeoutMs: 30000 }) });
+      results.push({ pass, text: await runOcr(pass.image, { lang: pass.lang, psm: pass.psm, timeoutMs: 20000 }) });
     } catch (err) {
-      console.error(`فشل ممر OCR (${pass.lang} psm${pass.psm}):`, (err as Error).message);
+      console.error(`فشل ممر OCR (${pass.image}):`, (err as Error).message);
     }
   }
+
+  for (const p of prepped) fs.rmSync(p, { force: true });
 
   const texts = results.map((r) => r.text);
   const mergedText = texts.join("\n");

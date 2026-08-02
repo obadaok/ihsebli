@@ -88,7 +88,7 @@ export async function startWhatsApp(config: WhatsAppConfig): Promise<WASocket> {
     for (const msg of upsert.messages) {
       if (msg.key.fromMe) continue;
       log(`  نوع الرسالة: ${msg.message ? Object.keys(msg.message).join(",") : "لا يوجد"}`);
-      await handleIncoming(sock, store, imagesDir, msg);
+      enqueue(() => handleIncoming(sock, store, imagesDir, msg));
     }
   });
 
@@ -102,6 +102,12 @@ export async function startWhatsApp(config: WhatsAppConfig): Promise<WASocket> {
   });
 
   return sock;
+}
+
+let processingQueue: Promise<unknown> = Promise.resolve();
+
+function enqueue(fn: () => Promise<unknown>): void {
+  processingQueue = processingQueue.then(fn, fn);
 }
 
 async function handleIncoming(

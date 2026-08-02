@@ -65,3 +65,32 @@ test("parseMessage يدعم أسماء متعددة الأسطر", () => {
   assert.equal(r.kind, "operation");
   assert.equal(r.operation!.name, "ملاك زكي أحمد سليمان");
 });
+
+test("parseMessage يدعم سطراً واحداً", () => {
+  const r = parseMessage("8409920 عبادة كمال 46.000.000");
+  assert.equal(r.kind, "operation");
+  assert.equal(r.operation!.accountNumber, "8409920");
+  assert.equal(r.operation!.name, "عبادة كمال");
+  assert.equal(r.operation!.requiredAmount, 46000000);
+});
+
+test("parseMessage يدعم سطراً واحداً بفواصل عربية", () => {
+  const r = parseMessage("8409920، عبادة كمال، 46.000.000");
+  assert.equal(r.kind, "operation");
+  assert.equal(r.operation!.name, "عبادة كمال");
+});
+
+test("parseMessage يدعم الاسم أولاً ثم الحساب ثم المبلغ", () => {
+  const r = parseMessage("حسن ادريس\n1765195\n9.000.000");
+  assert.equal(r.kind, "operation");
+  assert.equal(r.operation!.accountNumber, "1765195");
+  assert.equal(r.operation!.name, "حسن ادريس");
+  assert.equal(r.operation!.requiredAmount, 9000000);
+});
+
+test("parseMessage يدعم الاسم أولاً في سطر واحد", () => {
+  const r = parseMessage("حسن ادريس 1765195 9.000.000");
+  assert.equal(r.kind, "operation");
+  assert.equal(r.operation!.accountNumber, "1765195");
+  assert.equal(r.operation!.name, "حسن ادريس");
+});
